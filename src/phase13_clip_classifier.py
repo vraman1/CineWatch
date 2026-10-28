@@ -6,14 +6,14 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.metrics import accuracy_score,precision_score,recall_score,f1_score,confusion_matrix
-from common import OUT, need
+from common import OUT, MODELS, need
 # Learned video-level classifier: frozen CLIP image features + logistic regression.
 # Evaluated with stratified 5-fold cross-validation, so every video is scored by a model that never saw it.
 m=pd.read_csv(need(OUT/"metadata"/"frame_metadata.csv"))
 sc=pd.read_csv(need(OUT/"anomaly"/"anomaly_scores.csv"))[["frame_path","z_score"]]
 m=m.merge(sc,on="frame_path",how="left")
 feat_path=OUT/"evaluation"/"clip_frame_features.npy"
-model_id="openai/clip-vit-base-patch32"
+model_id=str(MODELS/"clip") if (MODELS/"clip"/"config.json").exists() else "openai/clip-vit-base-patch32"
 if feat_path.exists():
     F=np.load(feat_path)
 else:
@@ -50,5 +50,6 @@ import joblib
 clf.fit(X,y)
 joblib.dump({"model":clf,"clip_model":model_id,"features":"mean+max CLIP embedding + [z mean, z max, flagged fraction]"},
             OUT/"evaluation"/"clip_classifier.joblib")
+joblib.dump(joblib.load(OUT/"evaluation"/"clip_classifier.joblib"),MODELS/"clip_classifier.joblib")
 print("Saved model:",OUT/"evaluation"/"clip_classifier.joblib")
 print("Cross-validated on this 100-video subset only; not full-dataset performance.")

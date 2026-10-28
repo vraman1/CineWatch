@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pt
+!models/yolov8n.pt
 dataset/videos/*
 !dataset/videos/.gitkeep
 frames/*
@@ -10,3 +11,10 @@ outputs/*
 !outputs/.gitkeep
 !outputs/evaluation/
 outputs/evaluation/*.npy
+models/clip/
+models/blip/
+node_modules/
+frontend/dist/
+.gradio/
+outputs/uploads/
+outputs/hidden_incidents.json

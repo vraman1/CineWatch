@@ -28,12 +28,25 @@ python src/phase04_anomaly_detection.py
 python src/phase05_yolo_detection.py
 python src/phase06_tracking.py
 python src/phase07_08_09_events.py
-python src/phase10_summaries.py
-python src/phase11_visual_verification.py
+python src/phase11_visual_verification.py   # key-moment clips (run before phase 10)
+python src/phase10_summaries.py             # captions the key-moment frame
 python src/phase12_evaluation.py
 python src/phase13_clip_classifier.py   # learned CLIP classifier, 5-fold cross-validated
-python dashboard/app.py
+python src/export_models.py             # collects YOLO, CLIP, BLIP, classifier + calibration into models/
 ```
+
+## Web app (React + Flask)
+Requires Node.js 18+. Build the frontend once, then start the backend:
+```powershell
+cd frontend
+npm install
+npm run build
+cd ..
+python backend/app.py
+```
+Open http://127.0.0.1:5000. Tabs: **Overview** (metrics, baseline vs CLIP) and **Incidents** (full video beside the annotated incident clip, caption, motion timeline; incidents can be hidden).
+
+For frontend development with hot reload, keep `python backend/app.py` running and run `npm run dev` in `frontend/` (opens on port 5173 and proxies `/api` and `/media` to Flask).
 
 Phase 11 can be very slow on CPU; do not rerun unnecessarily. Reuse the CSVs and clips saved from Colab where possible. `/content/...` paths are temporary Colab paths, not Windows paths.
 

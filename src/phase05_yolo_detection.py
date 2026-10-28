@@ -1,7 +1,7 @@
 import pandas as pd
 from ultralytics import YOLO
-from common import OUT, need
-inc=pd.read_csv(need(OUT/"anomaly"/"incidents.csv")); model=YOLO("yolov8n.pt"); rows=[]
+from common import OUT, need, YOLO_WEIGHTS
+inc=pd.read_csv(need(OUT/"anomaly"/"incidents.csv")); model=YOLO(YOLO_WEIGHTS); rows=[]
 sc=pd.read_csv(need(OUT/"anomaly"/"anomaly_scores.csv")); ts=dict(zip(sc.frame_path,sc.timestamp_seconds))
 for r in inc.itertuples(index=False):
     for fp in str(r.frame_paths).split("|"):

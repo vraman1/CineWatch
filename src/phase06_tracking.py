@@ -1,11 +1,11 @@
 import pandas as pd
 from ultralytics import YOLO
-from common import OUT, need
+from common import OUT, need, YOLO_WEIGHTS
 inc=pd.read_csv(need(OUT/"anomaly"/"incidents.csv"));rows=[]
 sc=pd.read_csv(need(OUT/"anomaly"/"anomaly_scores.csv"));ts=dict(zip(sc.frame_path,sc.timestamp_seconds))
 for r in inc.itertuples(index=False):
     # Reinitialize tracker for each incident to avoid carrying track IDs between incidents.
-    model=YOLO("yolov8n.pt")
+    model=YOLO(YOLO_WEIGHTS)
     for fp in str(r.frame_paths).split("|"):
         if not fp:continue
         res=model.track(fp,persist=True,tracker="bytetrack.yaml",conf=.35,verbose=False)[0]
