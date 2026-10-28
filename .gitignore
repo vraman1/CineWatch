@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pt
+dataset/videos/*
+!dataset/videos/.gitkeep
+frames/*
+!frames/.gitkeep
+outputs/*
+!outputs/.gitkeep
+!outputs/evaluation/
+outputs/evaluation/*.npy

@@ -1,0 +1,2 @@
+method,videos,TP,TN,FP,FN,accuracy,precision,recall,f1,specificity,accuracy_mean_5_seeds,accuracy_std_5_seeds
+CLIP ViT-B/32 + logistic regression (5-fold CV),100,47,41,7,5,0.88,0.8703703703703703,0.9038461538461539,0.8867924528301887,0.8541666666666666,0.884,0.008000000000000007

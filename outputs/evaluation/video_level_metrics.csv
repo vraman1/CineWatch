@@ -1,0 +1,2 @@
+videos,incidents,TP,TN,FP,FN,accuracy,precision,recall,f1,specificity
+100,88,35,21,27,17,0.56,0.5645161290322581,0.6730769230769231,0.6140350877192983,0.4375
