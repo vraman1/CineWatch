@@ -98,11 +98,18 @@ def incident(iid):
                   "annotated": f"/media/annotated/{iid}.mp4?v={int(ann.stat().st_mtime)}" if len(v) and ann.exists() else None}
     return jsonify(e)
 
+def local_path(stored, base, depth):
+    # CSVs hold absolute paths from the machine that ran the pipeline. If that path doesn't exist here
+    # (project copied or unzipped elsewhere), rebuild it from its last `depth` parts under `base`.
+    base = base.resolve()
+    for p in (Path(str(stored).replace("\\", "/")), base.joinpath(*Path(str(stored).replace("\\", "/")).parts[-depth:])):
+        if p.exists() and p.resolve().is_relative_to(base): return p
+    return None
+
 def source_video(iid):
     inc = load("anomaly/incidents.csv"); r = inc[inc.incident_id == iid]
     if r.empty: return None
-    p = Path(r.iloc[0].video_path)
-    return p if p.exists() and p.resolve().is_relative_to((ROOT/"dataset").resolve()) else None
+    return local_path(r.iloc[0].video_path, ROOT/"dataset"/"videos", 2)  # <Category>/<video>.mp4
 
 @app.get("/media/<kind>/<iid>.mp4")
 def media(kind, iid):
@@ -119,8 +126,8 @@ def key_frame(iid):
     # The exact frame the caption describes (phase 10).
     sm = load("summaries/incident_summaries.csv"); s = sm[sm.incident_id == iid] if len(sm) else sm
     if s.empty or "key_frame" not in s.columns or pd.isna(s.iloc[0].key_frame): abort(404)
-    p = Path(s.iloc[0].key_frame)
-    if not (p.exists() and p.resolve().is_relative_to((ROOT/"frames").resolve())): abort(404)
+    p = local_path(s.iloc[0].key_frame, ROOT/"frames", 2)  # <video folder>/frame_xxxxx.jpg
+    if p is None: abort(404)
     return send_file(p, mimetype="image/jpeg")
 
 # ---------- React build ----------
