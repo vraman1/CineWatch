@@ -46,7 +46,7 @@ python backend/app.py
 ```
 Open http://127.0.0.1:5000 and upload a video. `src/analyze.py` detects incidents automatically with the saved models (motion scoring, CLIP classifier, YOLOv8s people and cars, BLIP caption) and shows the full video beside an annotated clip of each incident. It needs the CLIP and BLIP models in `models/` (`python src/export_models.py`).
 
-`dataset/s_videos/` holds the 10 selected UCF-Crime videos (included in this repository; the full 100-video set in `dataset/videos/` is not, download it with `python src/phase02_download.py`). The app recognises the 10 selected videos by content hash, so their selected incident also shows the reviewed description from `curation.json`; any other video gets the AI caption only. UCF-Crime videos are for research and academic use.
+`dataset/s_videos/` is for the 10 selected UCF-Crime videos listed in its README (videos are not in this repository; the full 100-video set for `dataset/videos/` can be downloaded with `python src/phase02_download.py`). The app recognises the 10 selected videos by content hash, so their selected incident also shows the reviewed description from `curation.json`; any other video gets the AI caption only. UCF-Crime videos are for research and academic use.
 
 For frontend development with hot reload, keep `python backend/app.py` running and run `npm run dev` in `frontend/` (opens on port 5173 and proxies `/api` and `/media` to Flask).
 

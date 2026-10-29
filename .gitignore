@@ -17,3 +17,5 @@ frontend/dist/
 .gradio/
 outputs/uploads/
 outputs/hidden_incidents.json
+dataset/s_videos/*
+!dataset/s_videos/README.txt
