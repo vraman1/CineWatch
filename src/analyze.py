@@ -145,7 +145,8 @@ def analyze(video, job_dir, max_incidents=5, progress=print):
             k = int(np.argmin([abs(t-e) for t in times])); hit = {"peak_k": k, "peak_z": float(z[k])}; found.append(hit)
         hit.update(start=s, end=e, reviewed=text, curated_id=iid)
     keep = [f for f in found if "reviewed" in f]
-    keep += sorted([f for f in found if "reviewed" not in f], key=lambda f: -f["peak_z"])[:max(0, max_incidents-len(keep))]
+    # Curated videos show only their reviewed incident; other motion spikes in them are not the event.
+    if not keep: keep = sorted(found, key=lambda f: -f["peak_z"])[:max_incidents]
     keep.sort(key=lambda f: f["start"])
 
     # Per incident: annotated clip, key frame, YOLO objects and BLIP caption.

@@ -18,7 +18,7 @@ const STEPS = [
   ["Sampling frames", "Sampling frames and scoring motion"],
   ["Running the CLIP classifier", "Running the CLIP crime classifier"],
   ["Checking the curated set", "Checking for a known video"],
-  ["Incident", "Detecting people and cars, captioning incidents"],
+  ["Incident", "Detecting and captioning incidents"],
   ["Preparing the full video", "Preparing the full video"],
 ];
 const stepIndex = (msg) => (msg ? STEPS.findIndex(([key]) => msg.startsWith(key)) : -1);
@@ -62,7 +62,7 @@ export default function App() {
             <span className="rec" aria-hidden="true" />
             <div>
               <h1>CineWatch</h1>
-              <p>AI incident analysis for surveillance video</p>
+              <p>Incident Analysis for Surveillance Video</p>
             </div>
           </div>
         </div>
@@ -73,10 +73,6 @@ export default function App() {
         {job && <Progress job={job} file={file} elapsed={(now - started) / 1000} />}
         {res && <Results res={res} onReset={reset} />}
       </main>
-
-      <footer className="foot">
-        Detected incidents are candidates for human review. The AI caption describes visible content and does not establish that a crime occurred.
-      </footer>
     </div>
   );
 }
@@ -207,7 +203,7 @@ function IncidentCard({ i, n, full, onHide }) {
       <header className="incident-head">
         <span className="num">{n}</span>
         <div>
-          <h3>Incident {n}</h3>
+          <h3>Incident</h3>
           <p className="muted">{clock(i.start_seconds)} – {clock(i.end_seconds)} · strongest moment at {clock(i.peak_seconds)}</p>
         </div>
         <div className="head-right">
@@ -223,22 +219,17 @@ function IncidentCard({ i, n, full, onHide }) {
         </figure>
         <figure>
           {i.clip ? <video src={i.clip} controls muted preload="metadata" /> : <div className="novideo">No clip</div>}
-          <figcaption>Incident only · people and cars detected</figcaption>
+          <figcaption>Incident only</figcaption>
         </figure>
       </div>
 
       <div className="context">
-        {i.reviewed_context && (
-          <div className="reviewed">
-            <span className="eyebrow">Reviewed description</span>
-            <p>{i.reviewed_context}</p>
-          </div>
-        )}
         <div className="ai">
           <img src={i.key_frame} alt="Strongest frame of the incident" />
           <div>
-            <span className="eyebrow">AI caption · strongest frame</span>
-            <p className="caption">“{i.ai_caption}”</p>
+            <span className="eyebrow">Caption - Strongest Frame</span>
+            {/* the reviewed description replaces the AI caption for videos in the curated set */}
+            <p className="caption">“{i.reviewed_context || i.ai_caption}”</p>
             <Objects text={i.key_objects} />
           </div>
         </div>

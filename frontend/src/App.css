@@ -36,9 +36,8 @@ p { margin: 0; }
 @keyframes rec { 50% { opacity: .35; box-shadow: 0 0 0 2px rgba(255, 77, 77, .1); } }
 
 /* ---------- layout ---------- */
-.main { max-width: 1120px; margin: -60px auto 0; padding: 0 20px; display: grid; gap: 16px; }
+.main { max-width: 1120px; margin: -60px auto 32px; padding: 0 20px; display: grid; gap: 16px; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); min-width: 0; }
-.foot { max-width: 1120px; margin: 28px auto; padding: 0 20px; color: var(--muted); font-size: 12.5px; text-align: center; }
 .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .section-head h3 { font-size: 16px; }
 
@@ -124,8 +123,6 @@ video { width: 100%; border-radius: 12px; background: #000; aspect-ratio: 4 / 3;
 figcaption { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
 .novideo { aspect-ratio: 4 / 3; display: grid; place-items: center; border-radius: 12px; background: var(--surface-2); color: var(--muted); }
 .context { display: grid; gap: 12px; }
-.reviewed { border-left: 4px solid var(--ok); background: var(--ok-soft); border-radius: 10px; padding: 12px 16px; }
-.reviewed p { font-size: 15.5px; }
 .ai { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: start; background: var(--surface-2); border-radius: 12px; padding: 12px; }
 .ai img { width: 100%; border-radius: 8px; display: block; }
 .caption { font-size: 15.5px; margin-bottom: 10px; }
