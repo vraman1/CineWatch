@@ -23,10 +23,13 @@ def models():
             import joblib, torch
             from transformers import CLIPModel, CLIPProcessor, pipeline
             _models["torch"] = torch
-            _models["clip"] = CLIPModel.from_pretrained(MODELS/"clip").eval()
-            _models["proc"] = CLIPProcessor.from_pretrained(MODELS/"clip")
+            # models/clip and models/blip are not in git (too large); download them once if they're missing.
+            local = lambda name, hub: str(MODELS/name) if (MODELS/name/"config.json").exists() else hub
+            clip_id = local("clip", "openai/clip-vit-base-patch32")
+            _models["clip"] = CLIPModel.from_pretrained(clip_id).eval()
+            _models["proc"] = CLIPProcessor.from_pretrained(clip_id)
             _models["clf"] = joblib.load(MODELS/"clip_classifier.joblib")["model"]
-            _models["blip"] = pipeline("image-to-text", model=str(MODELS/"blip"), device=-1)
+            _models["blip"] = pipeline("image-to-text", model=local("blip", "Salesforce/blip-image-captioning-base"), device=-1)
             _models["cal"] = json.loads((MODELS/"calibration.json").read_text())
     return _models
 
