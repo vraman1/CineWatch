@@ -55,6 +55,11 @@ def set_hidden(iid):
         HIDDEN.write_text(json.dumps(sorted(ids)))
     return jsonify({"incident_id": iid, "hidden": hide})
 
+def curation():
+    # Hand-picked featured incidents and human-reviewed descriptions (curation.json in the project root).
+    try: return json.loads((ROOT/"curation.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError): return {}
+
 def verified_videos():
     # Videos the CLIP classifier labels Crime in its cross-validated predictions (phase 13).
     p = load("evaluation/clip_classifier_predictions.csv")
@@ -69,9 +74,14 @@ def incidents():
     # Verified = CLIP calls the video Crime and the key moment is real footage, not a cut to a logo/black frame.
     vv = verified_videos(); ev["verified"] = (ev.video.isin(vv) if vv is not None else True) & ~edit
     ev["hidden"] = ev.incident_id.isin(hidden_ids())
+    # Featured incidents come first, in the curated order; the rest keep their id order.
+    cur = curation(); rank = {iid: k+1 for k, iid in enumerate(cur.get("featured", []))}
+    ev["featured"] = ev.incident_id.map(rank)
+    ev["reviewed_context"] = ev.incident_id.map(cur.get("reviewed", {}))
+    ev = ev.sort_values(["featured", "incident_id"], na_position="last")
     return jsonify(records(ev, ["incident_id", "video", "category", "reference_label", "severity", "severity_score",
                                 "start_seconds", "end_seconds", "duration_seconds", "anomaly_confidence", "visual_caption",
-                                "edit_only", "verified", "hidden"]))
+                                "edit_only", "verified", "hidden", "featured", "reviewed_context"]))
 
 @app.get("/api/incidents/<iid>")
 def incident(iid):
@@ -85,6 +95,9 @@ def incident(iid):
     e["key_frame"] = f"/media/frame/{iid}.jpg" if get("key_frame") else None
     vv = verified_videos(); e["verified"] = ((e["video"] in vv) if vv is not None else True) and not e["edit_only"]
     e["hidden"] = iid in hidden_ids()
+    cur = curation(); feat = cur.get("featured", [])
+    e["featured"] = feat.index(iid)+1 if iid in feat else None
+    e["reviewed_context"] = cur.get("reviewed", {}).get(iid)
     det = load("detections/yolo_detections.csv"); d = det[det.incident_id == iid] if len(det) else det
     e["objects"] = records(d.class_name.value_counts().rename_axis("name").reset_index(name="count")) if len(d) else []
     sc = load("anomaly/anomaly_scores.csv")

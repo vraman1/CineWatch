@@ -137,3 +137,5 @@ button.link { background: none; border: 0; color: var(--accent); font: inherit; 
 .hide-btn:hover { color: var(--text); border-color: var(--muted); }
 .hide-btn.on { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 .list li.is-hidden { opacity: .55; }
+.reviewed { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; }
+.reviewed p { margin: 0 0 2px; }

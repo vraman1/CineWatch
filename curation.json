@@ -1,0 +1,20 @@
+{
+  "_note": "Manual review of selected incidents. 'featured' are listed first in the app, in this order. 'reviewed' descriptions were written by a person after watching each clip; the BLIP caption is still shown separately as the AI caption. 'clip_override' sets the incident clip window in seconds [start, end] where the motion-based window missed part of the event (used by phase 11).",
+  "featured": ["INC_0001", "INC_0007", "INC_0010", "INC_0020", "INC_0029", "INC_0035", "INC_0036", "INC_0038", "INC_0039", "INC_0045"],
+  "reviewed": {
+    "INC_0001": "Several uniformed officers hold a person down on a bench in a holding room while another officer kneels beside them.",
+    "INC_0007": "At a busy road junction a police car pursues a white van; the van cuts across the junction and the police car pulls up against it, stopping it.",
+    "INC_0010": "In a waiting area with rows of chairs, officers grapple with a man and force him to the floor while other people look on.",
+    "INC_0020": "At night outside a bar (01:23 on the camera clock), a man in a white shirt attacks another man, who falls to the ground while bystanders watch.",
+    "INC_0029": "In a building entrance beside the glass doors, a man in a cap tackles another man and the two grapple on the floor.",
+    "INC_0035": "A fight breaks out in a busy fast-food restaurant: a man is knocked to the floor, objects are thrown and customers move away.",
+    "INC_0036": "In a gravel car park, a pickup truck reverses across the lot towards a parked silver car while two pedestrians walk past.",
+    "INC_0038": "Masked robbers raid a convenience store; one swings a bat towards a person at the door while another stays behind the counter.",
+    "INC_0039": "A man in a blue helmet lunges at two women leaving a gated entrance and knocks one to the ground in an apparent bag snatch; a man in a cap then runs after him.",
+    "INC_0045": "A car drives past a pavement flower stall, stops a little further along the street and its boot is opened."
+  },
+  "clip_override": {
+    "INC_0036": [0, 4],
+    "INC_0045": [0, 8]
+  }
+}

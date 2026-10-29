@@ -1,6 +1,6 @@
-import cv2, subprocess, pandas as pd
+import cv2, json, subprocess, pandas as pd
 from multiprocessing import Pool
-from common import OUT, need, YOLO_WEIGHTS, is_blank
+from common import ROOT, OUT, need, YOLO_WEIGHTS, is_blank
 # Optional quick test: set MAX_INCIDENTS=2. None processes all incidents.
 MAX_INCIDENTS=None
 WORKERS=4          # incidents processed in parallel
@@ -26,7 +26,12 @@ def incident_window(sc,r):
     real=s[~s.edit]; edit_only=real.empty; s=s if edit_only else real
     if s.empty: return max(0,float(r.start_seconds)-STEP),float(r.end_seconds),float(r.start_seconds),True
     peak=float(s.loc[s.z_score.idxmax(),"timestamp_seconds"])
-    return max(0,float(s.timestamp_seconds.min())-STEP),float(s.timestamp_seconds.max()),peak,edit_only
+    start,end=max(0,float(s.timestamp_seconds.min())-STEP),float(s.timestamp_seconds.max())
+    if r.incident_id in OVERRIDE: start,end=map(float,OVERRIDE[r.incident_id])  # manual fix from curation.json
+    return start,end,peak,edit_only
+
+# Clip windows corrected by hand in curation.json, where the motion window missed part of the event.
+OVERRIDE=json.loads((ROOT/"curation.json").read_text(encoding="utf-8")).get("clip_override",{}) if (ROOT/"curation.json").exists() else {}
 
 def draw(frame,res,names,title):
     # YOLO runs on the native frame (fast); boxes are drawn on the upscaled frame with thin lines and small labels.

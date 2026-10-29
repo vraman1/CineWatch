@@ -156,14 +156,15 @@ function Incidents({ list, onHide }) {
   const [sev, setSev] = useState("All");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(null);
-  const [showAll, setShowAll] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const cats = useMemo(() => ["All", ...new Set(list.map((i) => i.category))], [list]);
   const verifiedCount = list.filter((i) => i.verified).length;
   const hiddenCount = list.filter((i) => i.hidden).length;
-  const shown = list.filter((i) => (showAll || i.verified) && (showHidden || !i.hidden) &&
+  // Unverified motion flags go to the end; the stable sort keeps the backend order (selected incidents first) otherwise.
+  const shown = list.filter((i) => (showHidden || !i.hidden) &&
     (cat === "All" || i.category === cat) && (sev === "All" || i.severity === sev) &&
-    (!q || `${i.incident_id} ${i.video} ${i.visual_caption ?? ""}`.toLowerCase().includes(q.toLowerCase())));
+    (!q || `${i.incident_id} ${i.video} ${i.visual_caption ?? ""} ${i.reviewed_context ?? ""}`.toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => Number(!a.verified) - Number(!b.verified));
   useEffect(() => { if (!shown.some((i) => i.incident_id === sel)) setSel(shown[0]?.incident_id ?? null); }, [shown, sel]);
 
   async function toggleHidden(id, hidden) {
@@ -183,24 +184,21 @@ function Incidents({ list, onHide }) {
             <select value={cat} onChange={(e) => setCat(e.target.value)}>{cats.map((c) => <option key={c}>{c}</option>)}</select>
             <select value={sev} onChange={(e) => setSev(e.target.value)}>{["All", "High", "Medium", "Low"].map((c) => <option key={c}>{c}</option>)}</select>
           </div>
-          <label className="toggle">
-            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-            Also show unverified motion flags ({list.length - verifiedCount})
-          </label>
           {hiddenCount > 0 && (
             <label className="toggle">
               <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
               Show incidents I hid ({hiddenCount})
             </label>
           )}
-          <small className="muted">{shown.length} shown · {verifiedCount} of {list.length} verified by the CLIP classifier</small>
+          <small className="muted">{shown.length} shown · {verifiedCount} of {list.length} verified by the CLIP classifier; unverified motion flags are listed last</small>
         </div>
         <ul>
           {shown.map((i) => (
             <li key={i.incident_id} className={`${sel === i.incident_id ? "sel" : ""} ${i.hidden ? "is-hidden" : ""}`} onClick={() => setSel(i.incident_id)}>
               <div className="li-top"><b>{i.incident_id}</b><span>{i.hidden && <span className="flag">hidden</span>}{!i.verified && <span className="flag">{i.edit_only ? "video edit" : "motion only"}</span>} <Sev s={i.severity} /></span></div>
               <div className="li-sub">{i.category} · {fmt(i.start_seconds, 0)}–{fmt(i.end_seconds, 0)} s</div>
-              {i.visual_caption && <div className="li-cap">“{i.visual_caption}”</div>}
+              {i.reviewed_context ? <div className="li-cap">{i.reviewed_context}</div>
+                : i.visual_caption && <div className="li-cap">“{i.visual_caption}”</div>}
             </li>
           ))}
         </ul>
@@ -236,6 +234,12 @@ function IncidentDetail({ id, hidden, onToggleHidden }) {
       <div className="grid2">
         <div className="card">
           <h3>Event context</h3>
+          {d.reviewed_context && (
+            <div className="reviewed">
+              <p className="muted small">Reviewed description (written after watching the clip):</p>
+              <p className="caption">{d.reviewed_context}</p>
+            </div>
+          )}
           <div className="context">
             {d.key_frame && <img src={d.key_frame} alt="Key-moment frame the caption describes" />}
             <div>

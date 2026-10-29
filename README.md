@@ -50,5 +50,8 @@ For frontend development with hot reload, keep `python backend/app.py` running a
 
 Phase 11 can be very slow on CPU; do not rerun unnecessarily. Reuse the CSVs and clips saved from Colab where possible. `/content/...` paths are temporary Colab paths, not Windows paths.
 
+## Curated incidents
+`curation.json` lists the incidents shown first in the app (`featured`), a description of each written by a person after watching the clip (`reviewed`, shown above the BLIP caption), and manual clip windows (`clip_override`, used by phase 11) where the motion window missed part of the event. Unverified motion flags are listed last.
+
 ## Important limitations
 This is a prototype. Anomaly detection uses motion/scene-change heuristics, YOLO detects objects rather than crimes, BLIP captions do not prove a crime occurred, and severity is a heuristic rather than a human-validated assessment. Results apply only to the selected videos and should not be described as general UCF-Crime accuracy.
