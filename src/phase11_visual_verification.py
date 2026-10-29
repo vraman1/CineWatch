@@ -1,6 +1,6 @@
 import cv2, json, subprocess, pandas as pd
 from multiprocessing import Pool
-from common import ROOT, OUT, need, YOLO_WEIGHTS, is_blank
+from common import ROOT, OUT, need, YOLO_WEIGHTS, TRACK_CLASSES, TRACK_CONF, DETECT_EVERY, is_blank
 # Optional quick test: set MAX_INCIDENTS=2. None processes all incidents.
 MAX_INCIDENTS=None
 WORKERS=4          # incidents processed in parallel
@@ -33,15 +33,17 @@ def incident_window(sc,r):
 # Clip windows corrected by hand in curation.json, where the motion window missed part of the event.
 OVERRIDE=json.loads((ROOT/"curation.json").read_text(encoding="utf-8")).get("clip_override",{}) if (ROOT/"curation.json").exists() else {}
 
-def draw(frame,res,names,title):
+def draw(frame,res,title):
     # YOLO runs on the native frame (fast); boxes are drawn on the upscaled frame with thin lines and small labels.
+    # Only people and cars are drawn (TRACK_CLASSES); vans/pickups ('truck') share the car colour and label.
     from ultralytics.utils.plotting import colors
     big=cv2.resize(frame,None,fx=SCALE,fy=SCALE,interpolation=cv2.INTER_CUBIC)
     b=res.boxes
     if b is not None and len(b):
         ids=b.id.int().tolist() if b.id is not None else [None]*len(b)
         for (x1,y1,x2,y2),c,i in zip((b.xyxy*SCALE).int().tolist(),b.cls.int().tolist(),ids):
-            col=colors(c,True); label=f"{'' if i is None else f'id:{i} '}{names[c]}"
+            if c not in TRACK_CLASSES: continue
+            name=TRACK_CLASSES[c]; col=colors(0 if name=="person" else 2,True); label=f"{'' if i is None else f'id:{i} '}{name}"
             cv2.rectangle(big,(x1,y1),(x2,y2),col,1)
             (tw,th),_=cv2.getTextSize(label,cv2.FONT_HERSHEY_SIMPLEX,.4,1)
             cv2.rectangle(big,(x1,max(0,y1-th-4)),(x1+tw+4,y1),col,-1)
@@ -66,8 +68,9 @@ def work(job):
     while cap.get(cv2.CAP_PROP_POS_MSEC)/1000<=end:
         ok,frame=cap.read()
         if not ok:break
-        res=model.track(frame,persist=True,tracker="bytetrack.yaml",conf=.35,imgsz=320,verbose=False)[0]
-        aw.write(draw(frame,res,model.names,title));n+=1
+        if n%DETECT_EVERY==0:  # boxes from the last detection are reused on the frames in between
+            res=model.track(frame,persist=True,tracker="bytetrack.yaml",conf=TRACK_CONF,imgsz=320,classes=list(TRACK_CLASSES),verbose=False)[0]
+        aw.write(draw(frame,res,title));n+=1
     cap.release();aw.release()
     if n: to_h264(ap)
     print("Verified",r["incident_id"],"frames:",n,flush=True)

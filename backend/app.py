@@ -1,11 +1,14 @@
-import json, math, threading
+import json, math, sys, threading, uuid
 from pathlib import Path
 import numpy as np, pandas as pd
 from flask import Flask, jsonify, request, send_file, send_from_directory, abort
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT/"outputs"; DIST = ROOT/"frontend"/"dist"
+UPLOADS = OUT/"uploads"
+sys.path.insert(0, str(ROOT/"src"))  # the Analyze tab reuses the pipeline code in src/analyze.py
 app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = 500*1024*1024  # 500 MB upload limit
 
 def load(p):
     p = OUT/p
@@ -55,6 +58,18 @@ def set_hidden(iid):
         HIDDEN.write_text(json.dumps(sorted(ids)))
     return jsonify({"incident_id": iid, "hidden": hide})
 
+# Only people and cars are shown (same rule as the annotated clips); vans/pickups ("truck") count as cars.
+SHOWN_OBJECTS = {"person": "person", "car": "car", "truck": "car"}
+
+def people_and_cars(text):
+    # "6 car, 1 bus, 1 person, 2 truck" -> "8 car, 1 person"
+    if not isinstance(text, str): return text
+    counts = {}
+    for part in text.split(","):
+        n, _, name = part.strip().partition(" ")
+        if name in SHOWN_OBJECTS and n.isdigit(): counts[SHOWN_OBJECTS[name]] = counts.get(SHOWN_OBJECTS[name], 0) + int(n)
+    return ", ".join(f"{c} {k}" for k, c in sorted(counts.items(), key=lambda kv: -kv[1])) or "none"
+
 def curation():
     # Hand-picked featured incidents and human-reviewed descriptions (curation.json in the project root).
     try: return json.loads((ROOT/"curation.json").read_text(encoding="utf-8"))
@@ -90,16 +105,17 @@ def incident(iid):
     e = {k: clean(v) for k, v in e.iloc[0].to_dict().items()}
     sm = load("summaries/incident_summaries.csv"); s = sm[sm.incident_id == iid] if len(sm) else sm
     get = lambda k: clean(s.iloc[0][k]) if len(s) and k in s.columns else None
-    e["visual_caption"], e["caution"], e["key_objects"] = get("visual_caption"), get("caution"), get("key_objects")
+    e["visual_caption"], e["caution"] = get("visual_caption"), get("caution")
+    e["key_objects"] = people_and_cars(get("key_objects"))
     e["edit_only"] = bool(get("edit_only") or False)
-    e["key_frame"] = f"/media/frame/{iid}.jpg" if get("key_frame") else None
     vv = verified_videos(); e["verified"] = ((e["video"] in vv) if vv is not None else True) and not e["edit_only"]
     e["hidden"] = iid in hidden_ids()
     cur = curation(); feat = cur.get("featured", [])
     e["featured"] = feat.index(iid)+1 if iid in feat else None
     e["reviewed_context"] = cur.get("reviewed", {}).get(iid)
     det = load("detections/yolo_detections.csv"); d = det[det.incident_id == iid] if len(det) else det
-    e["objects"] = records(d.class_name.value_counts().rename_axis("name").reset_index(name="count")) if len(d) else []
+    d = d[d.class_name.isin(SHOWN_OBJECTS)].class_name.map(SHOWN_OBJECTS) if len(d) else d
+    e["objects"] = records(d.value_counts().rename_axis("name").reset_index(name="count")) if len(d) else []
     sc = load("anomaly/anomaly_scores.csv")
     e["timeline"] = records(sc[sc.video == e["video"]].sort_values("timestamp_seconds"), ["timestamp_seconds", "z_score", "anomaly"])
     # Left: the full source video. Right: the annotated key-moment clip from phase 11.
@@ -134,14 +150,51 @@ def media(kind, iid):
     r.headers["Cache-Control"] = "no-cache"  # always revalidate: clips are regenerated in place
     return r
 
-@app.get("/media/frame/<iid>.jpg")
-def key_frame(iid):
-    # The exact frame the caption describes (phase 10).
-    sm = load("summaries/incident_summaries.csv"); s = sm[sm.incident_id == iid] if len(sm) else sm
-    if s.empty or "key_frame" not in s.columns or pd.isna(s.iloc[0].key_frame): abort(404)
-    p = local_path(s.iloc[0].key_frame, ROOT/"frames", 2)  # <video folder>/frame_xxxxx.jpg
-    if p is None: abort(404)
-    return send_file(p, mimetype="image/jpeg")
+# ---------- analyse a video (Analyze tab) ----------
+_analyze_lock = threading.Lock()  # one analysis at a time: it is CPU-heavy
+
+# Analysis runs as a background job so the page can show which step is running.
+JOBS = {}  # job id -> {"status": "queued|running|done|error", "step": str, "result": dict, "error": str}
+
+def run_job(job, src, folder, label):
+    from analyze import analyze
+    def progress(msg): JOBS[job]["step"] = msg
+    try:
+        with _analyze_lock:  # queued jobs wait here
+            JOBS[job]["status"] = "running"
+            r = analyze(src, folder, progress=progress)
+        base = f"/media/uploads/{job}/"
+        for i in r["incidents"]:
+            i["clip"] = base+i["clip"] if i["clip"] else None; i["key_frame"] = base+i["key_frame"]
+        r.update(file=label, full_video=base+"full.mp4")
+        JOBS[job].update(status="done", result=r)
+    except ValueError as e:
+        JOBS[job].update(status="error", error=str(e))
+    except Exception as e:
+        JOBS[job].update(status="error", error=f"Analysis failed: {e}")
+    finally:
+        src.unlink(missing_ok=True)  # keep only the generated clips
+
+@app.post("/api/analyze")
+def analyze_video():
+    f = request.files.get("video")
+    if not (f and f.filename): return jsonify({"error": "Choose a video first."}), 400
+    job = uuid.uuid4().hex[:12]; folder = UPLOADS/job; folder.mkdir(parents=True, exist_ok=True)
+    src = folder/("input"+(Path(f.filename).suffix.lower() or ".mp4")); f.save(src)
+    JOBS[job] = {"status": "queued", "step": "Waiting for the previous analysis to finish"}
+    threading.Thread(target=run_job, args=(job, src, folder, f.filename), daemon=True).start()
+    return jsonify({"job": job})
+
+@app.get("/api/analyze/<job>")
+def analyze_status(job):
+    if job not in JOBS: abort(404)
+    return jsonify(JOBS[job])
+
+@app.get("/media/uploads/<job>/<name>")
+def upload_media(job, name):
+    p = UPLOADS/job/name
+    if not (job.isalnum() and p.suffix in (".mp4", ".jpg") and p.resolve().parent == (UPLOADS/job).resolve() and p.exists()): abort(404)
+    return send_file(p, mimetype="video/mp4" if p.suffix == ".mp4" else "image/jpeg", conditional=True)
 
 # ---------- React build ----------
 @app.get("/", defaults={"path": ""})

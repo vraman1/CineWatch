@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const Z_THRESHOLD = 3.5;
-const fmt = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
 const pct = (v) => (v === null || v === undefined ? "—" : `${Math.round(v * 100)}%`);
+const clock = (s) => { s = Math.max(0, Math.round(s ?? 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const mb = (bytes) => `${(bytes / 2 ** 20).toFixed(1)} MB`;
 
 async function getJSON(url, opts) {
   const r = await fetch(url, opts);
@@ -11,307 +12,287 @@ async function getJSON(url, opts) {
   return body;
 }
 
+// Steps reported by src/analyze.py, in order. "Incident n of m" messages belong to the "Incident" step.
+const STEPS = [
+  ["Loading the models", "Loading the models"],
+  ["Sampling frames", "Sampling frames and scoring motion"],
+  ["Running the CLIP classifier", "Running the CLIP crime classifier"],
+  ["Checking the curated set", "Checking for a known video"],
+  ["Incident", "Detecting people and cars, captioning incidents"],
+  ["Preparing the full video", "Preparing the full video"],
+];
+const stepIndex = (msg) => (msg ? STEPS.findIndex(([key]) => msg.startsWith(key)) : -1);
+
 export default function App() {
-  const [tab, setTab] = useState("overview");
-  const [summary, setSummary] = useState(null);
-  const [incidents, setIncidents] = useState([]);
-  const [error, setError] = useState(null);
+  const [file, setFile] = useState(null);
+  const [job, setJob] = useState(null);       // {id, status, step}
+  const [res, setRes] = useState(null);
+  const [err, setErr] = useState(null);
+  const [started, setStarted] = useState(null);
+  const [now, setNow] = useState(Date.now());
 
+  // Poll the background job once a second while it runs.
   useEffect(() => {
-    Promise.all([getJSON("/api/summary"), getJSON("/api/incidents")])
-      .then(([s, i]) => { setSummary(s); setIncidents(i); })
-      .catch((e) => setError(e.message));
-  }, []);
+    if (!job) return;
+    const t = setInterval(async () => {
+      setNow(Date.now());
+      try {
+        const s = await getJSON(`/api/analyze/${job.id}`);
+        if (s.status === "done") { setRes(s.result); setJob(null); }
+        else if (s.status === "error") { setErr(s.error); setJob(null); }
+        else setJob({ id: job.id, ...s });
+      } catch (e) { setErr(e.message); setJob(null); }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [job]);
 
-  // Hidden incidents are stored by the backend, so they stay hidden after a refresh or restart.
-  async function setHidden(id, hidden) {
-    await getJSON(`/api/incidents/${id}/hidden`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hidden }),
-    });
-    setIncidents((list) => list.map((i) => (i.incident_id === id ? { ...i, hidden } : i)));
+  async function run() {
+    setErr(null); setRes(null); setStarted(Date.now()); setNow(Date.now());
+    const fd = new FormData(); fd.append("video", file);
+    try { const { job: id } = await getJSON("/api/analyze", { method: "POST", body: fd }); setJob({ id, status: "queued" }); }
+    catch (e) { setErr(e.message); }
   }
+  function reset() { setFile(null); setRes(null); setErr(null); setJob(null); }
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brand">
-          <span className="logo">●</span>
-          <div>
-            <h1>CineWatch</h1>
-            <p>Surveillance video analytics · UCF-Crime</p>
+    <div className="page">
+      <header className="hero">
+        <div className="hero-inner">
+          <div className="brand">
+            <span className="rec" aria-hidden="true" />
+            <div>
+              <h1>CineWatch</h1>
+              <p>AI incident analysis for surveillance video</p>
+            </div>
           </div>
         </div>
-        <nav className="tabs">
-          {[["overview", "Overview"], ["incidents", "Incidents"]].map(([k, label]) => (
-            <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}</button>
-          ))}
-        </nav>
       </header>
-      <main>
-        {error && <div className="card error">Could not reach the backend: {error}. Is <code>python backend/app.py</code> running?</div>}
-        {tab === "overview" && <Overview s={summary} />}
-        {tab === "incidents" && <Incidents list={incidents} onHide={setHidden} />}
+
+      <main className="main">
+        {!job && !res && <Upload file={file} setFile={setFile} onRun={run} err={err} />}
+        {job && <Progress job={job} file={file} elapsed={(now - started) / 1000} />}
+        {res && <Results res={res} onReset={reset} />}
       </main>
-      <footer>Candidate incidents require human verification. Severity is heuristic; captions describe visible content and do not establish that a crime occurred.</footer>
+
+      <footer className="foot">
+        Detected incidents are candidates for human review. The AI caption describes visible content and does not establish that a crime occurred.
+      </footer>
     </div>
   );
 }
 
-/* ---------------- Overview ---------------- */
-function Overview({ s }) {
-  if (!s) return <div className="card muted">Loading results…</div>;
-  const b = s.metrics.baseline, c = s.metrics.clip;
-  const rows = [["Accuracy", "accuracy"], ["Precision", "precision"], ["Recall", "recall"], ["F1 score", "f1"], ["Specificity", "specificity"]];
-  const maxObj = Math.max(1, ...s.top_objects.map((o) => o.count));
+/* ---------------- Upload ---------------- */
+function Upload({ file, setFile, onRun, err }) {
+  const [drag, setDrag] = useState(false);
+  const input = useRef(null);
+  const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => preview && URL.revokeObjectURL(preview), [preview]);
+  const pick = (f) => { if (f && f.type.startsWith("video/")) setFile(f); };
+
+  return (
+    <section className="panel upload-panel">
+      {!file ? (
+        <div className={`drop ${drag ? "over" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }}
+          onClick={() => input.current?.click()} role="button" tabIndex={0}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}>
+          <svg className="drop-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="6" y="12" width="28" height="24" rx="4" /><path d="M34 21l8-5v16l-8-5z" />
+            <path className="arrow" d="M20 30V18m-5 5l5-5 5 5" />
+          </svg>
+          <h2>Drop a CCTV video here</h2>
+          <p>or <span className="link-like">browse your files</span> · MP4, AVI, MOV, MKV</p>
+          <input ref={input} type="file" accept="video/*" hidden onChange={(e) => pick(e.target.files[0])} />
+        </div>
+      ) : (
+        <div className="chosen">
+          <video src={preview} controls muted />
+          <div className="chosen-info">
+            <span className="eyebrow">Ready to analyze</span>
+            <h2 title={file.name}>{file.name}</h2>
+            <p className="muted">{mb(file.size)}</p>
+            <div className="actions">
+              <button className="btn primary" onClick={onRun}>Analyze video</button>
+              <button className="btn ghost" onClick={() => setFile(null)}>Choose another</button>
+            </div>
+            <p className="muted small">Usually 5–20 seconds; the first video after starting the app also loads the models.</p>
+          </div>
+        </div>
+      )}
+      {err && <p className="error-text">{err}</p>}
+    </section>
+  );
+}
+
+/* ---------------- Progress ---------------- */
+function Progress({ job, file, elapsed }) {
+  const cur = stepIndex(job.step);
+  return (
+    <section className="panel progress-panel">
+      <div className="progress-head">
+        <div className="spinner" aria-hidden="true" />
+        <div>
+          <h2>Analyzing {file?.name}</h2>
+          <p className="muted">{job.status === "queued" ? job.step ?? "Starting…" : `${Math.round(elapsed)} s elapsed`}</p>
+        </div>
+      </div>
+      <ol className="steps">
+        {STEPS.map(([key, label], k) => (
+          <li key={key} className={k < cur ? "done" : k === cur ? "active" : ""}>
+            <span className="dot" aria-hidden="true" />
+            <span>{label}{k === cur && key === "Incident" && job.step ? ` · ${job.step.split(":")[0]}` : ""}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/* ---------------- Results ---------------- */
+function Results({ res, onReset }) {
+  const [hidden, setHidden] = useState([]);
+  const shown = res.incidents.filter((i) => !hidden.includes(i.incident_id));
+  const crime = res.prediction === "Crime";
   return (
     <>
-      <section className="stats">
-        <Stat label="Videos" value={s.videos} sub={`${s.crime_videos} crime · ${s.normal_videos} normal`} />
-        <Stat label="Frames sampled" value={s.frames.toLocaleString()} sub="1 every 2 s" />
-        <Stat label="Incidents" value={s.incidents} sub="motion-flagged" />
-        <Stat label="Object detections" value={s.detections.toLocaleString()} sub="YOLOv8n" />
-        <Stat label="CLIP accuracy" value={pct(c?.accuracy)} sub="5-fold cross-validated" accent />
-      </section>
-
-      <section className="grid2">
-        <div className="card">
-          <h2>Model comparison</h2>
-          <p className="muted">Video-level crime vs normal, same 100 videos.</p>
-          <div className="legend"><span className="sw base" />Motion baseline<span className="sw clip" />CLIP classifier</div>
-          {rows.map(([label, k]) => (
-            <div className="metric" key={k}>
-              <span className="mlabel">{label}</span>
-              <div className="bars">
-                <Bar v={b?.[k]} cls="base" />
-                <Bar v={c?.[k]} cls="clip" />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="card">
-          <h2>Confusion matrices</h2>
-          <div className="cms">
-            <Confusion title="Motion baseline" m={b} />
-            <Confusion title="CLIP classifier" m={c} />
+      <section className="summary">
+        <div className={`panel verdict ${crime ? "crime" : "normal"}`}>
+          <span className="eyebrow">CLIP classifier verdict</span>
+          <strong>{res.prediction}</strong>
+          <div className="gauge" role="img" aria-label={`Crime probability ${pct(res.crime_probability)}`}>
+            <i style={{ width: pct(res.crime_probability) }} /><b />
           </div>
-          {c?.accuracy_mean_5_seeds !== undefined && (
-            <p className="muted small">CLIP accuracy over 5 random splits: {pct(c.accuracy_mean_5_seeds)} ± {fmt(c.accuracy_std_5_seeds * 100, 1)} pts.</p>
-          )}
+          <small>Crime probability {pct(res.crime_probability)} · threshold 50%</small>
         </div>
+        <div className="panel fact">
+          <span className="eyebrow">Video</span>
+          <strong>{clock(res.duration_seconds)}</strong>
+          <small className="clip-name" title={res.file}>{res.file}</small>
+        </div>
+        <div className="panel fact">
+          <span className="eyebrow">Incidents detected</span>
+          <strong>{res.incidents_found}</strong>
+          <small>{res.video_edits_skipped ? `${res.video_edits_skipped} video edit(s) ignored` : "from motion analysis"}</small>
+        </div>
+        <button className="btn ghost again" onClick={onReset}>Analyze another video</button>
       </section>
 
-      <section className="grid2">
-        <div className="card">
-          <h2>Severity by reference label</h2>
-          <table className="table">
-            <thead><tr><th>Label</th><th>High</th><th>Medium</th><th>Low</th></tr></thead>
-            <tbody>
-              {s.severity.map((r) => (
-                <tr key={r.reference_label}>
-                  <td>{r.reference_label === "normal" ? "Normal" : "Crime"}</td>
-                  <td>{r.High ?? 0}</td><td>{r.Medium ?? 0}</td><td>{r.Low ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {res.known_video && (
+        <div className="panel known">
+          <Check /> <span>Recognised as <b>{res.known_video.video}</b> ({res.known_video.category}) from the reviewed set, so its selected incident includes a reviewed description.</span>
         </div>
-        <div className="card">
-          <h2>Most detected objects</h2>
-          {s.top_objects.map((o) => (
-            <div className="hbar" key={o.name}>
-              <span>{o.name}</span>
-              <div><i style={{ width: `${(o.count / maxObj) * 100}%` }} /></div>
-              <b>{o.count}</b>
-            </div>
-          ))}
-        </div>
+      )}
+
+      {res.incidents.length === 0 && <div className="panel muted">No incidents above the motion threshold in this video.</div>}
+      {hidden.length > 0 && (
+        <div className="panel muted small">{hidden.length} incident(s) hidden. <button className="link" onClick={() => setHidden([])}>Show all</button></div>
+      )}
+      {shown.map((i) => (
+        <IncidentCard key={i.incident_id} i={i} n={res.incidents.indexOf(i) + 1} full={res.full_video}
+          onHide={() => setHidden((h) => [...h, i.incident_id])} />
+      ))}
+
+      <section className="panel">
+        <div className="section-head"><h3>Motion over time</h3><span className="muted small">Shaded: detected incidents · dashed: alert threshold</span></div>
+        <Timeline points={res.timeline} incidents={res.incidents} />
       </section>
     </>
   );
 }
 
-const Stat = ({ label, value, sub, accent }) => (
-  <div className={`card stat ${accent ? "accent" : ""}`}><span>{label}</span><strong>{value}</strong><small>{sub}</small></div>
-);
-const Bar = ({ v, cls }) => (
-  <div className="bar"><i className={cls} style={{ width: `${(v ?? 0) * 100}%` }} /><em>{fmt(v)}</em></div>
-);
-function Confusion({ title, m }) {
-  if (!m) return null;
+function IncidentCard({ i, n, full, onHide }) {
   return (
-    <div className="cm">
-      <h3>{title}</h3>
-      <div className="cmgrid">
-        <span /><span className="h">Pred. normal</span><span className="h">Pred. crime</span>
-        <span className="h">Normal</span><b className="ok">{m.TN}</b><b className="bad">{m.FP}</b>
-        <span className="h">Crime</span><b className="bad">{m.FN}</b><b className="ok">{m.TP}</b>
+    <article className="panel incident">
+      <header className="incident-head">
+        <span className="num">{n}</span>
+        <div>
+          <h3>Incident {n}</h3>
+          <p className="muted">{clock(i.start_seconds)} – {clock(i.end_seconds)} · strongest moment at {clock(i.peak_seconds)}</p>
+        </div>
+        <div className="head-right">
+          {i.reviewed_context && <span className="badge ok"><Check /> Reviewed</span>}
+          <button className="btn ghost small" onClick={onHide}>Hide</button>
+        </div>
+      </header>
+
+      <div className="videos">
+        <figure>
+          <video src={`${full}#t=${i.start_seconds}`} controls muted preload="metadata" />
+          <figcaption>Full video · opens at {clock(i.start_seconds)}</figcaption>
+        </figure>
+        <figure>
+          {i.clip ? <video src={i.clip} controls muted preload="metadata" /> : <div className="novideo">No clip</div>}
+          <figcaption>Incident only · people and cars detected</figcaption>
+        </figure>
       </div>
-    </div>
-  );
-}
 
-/* ---------------- Incidents ---------------- */
-function Incidents({ list, onHide }) {
-  const [cat, setCat] = useState("All");
-  const [sev, setSev] = useState("All");
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const cats = useMemo(() => ["All", ...new Set(list.map((i) => i.category))], [list]);
-  const verifiedCount = list.filter((i) => i.verified).length;
-  const hiddenCount = list.filter((i) => i.hidden).length;
-  // Unverified motion flags go to the end; the stable sort keeps the backend order (selected incidents first) otherwise.
-  const shown = list.filter((i) => (showHidden || !i.hidden) &&
-    (cat === "All" || i.category === cat) && (sev === "All" || i.severity === sev) &&
-    (!q || `${i.incident_id} ${i.video} ${i.visual_caption ?? ""} ${i.reviewed_context ?? ""}`.toLowerCase().includes(q.toLowerCase())))
-    .sort((a, b) => Number(!a.verified) - Number(!b.verified));
-  useEffect(() => { if (!shown.some((i) => i.incident_id === sel)) setSel(shown[0]?.incident_id ?? null); }, [shown, sel]);
-
-  async function toggleHidden(id, hidden) {
-    // When hiding the open incident, move on to its neighbour in the list.
-    const k = shown.findIndex((i) => i.incident_id === id);
-    const next = shown[k + 1] ?? shown[k - 1];
-    await onHide(id, hidden);
-    if (hidden && !showHidden) setSel(next?.incident_id ?? null);
-  }
-
-  return (
-    <div className="incidents">
-      <aside className="card list">
-        <div className="filters">
-          <input placeholder="Search id, video, caption…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="row">
-            <select value={cat} onChange={(e) => setCat(e.target.value)}>{cats.map((c) => <option key={c}>{c}</option>)}</select>
-            <select value={sev} onChange={(e) => setSev(e.target.value)}>{["All", "High", "Medium", "Low"].map((c) => <option key={c}>{c}</option>)}</select>
+      <div className="context">
+        {i.reviewed_context && (
+          <div className="reviewed">
+            <span className="eyebrow">Reviewed description</span>
+            <p>{i.reviewed_context}</p>
           </div>
-          {hiddenCount > 0 && (
-            <label className="toggle">
-              <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
-              Show incidents I hid ({hiddenCount})
-            </label>
-          )}
-          <small className="muted">{shown.length} shown · {verifiedCount} of {list.length} verified by the CLIP classifier; unverified motion flags are listed last</small>
-        </div>
-        <ul>
-          {shown.map((i) => (
-            <li key={i.incident_id} className={`${sel === i.incident_id ? "sel" : ""} ${i.hidden ? "is-hidden" : ""}`} onClick={() => setSel(i.incident_id)}>
-              <div className="li-top"><b>{i.incident_id}</b><span>{i.hidden && <span className="flag">hidden</span>}{!i.verified && <span className="flag">{i.edit_only ? "video edit" : "motion only"}</span>} <Sev s={i.severity} /></span></div>
-              <div className="li-sub">{i.category} · {fmt(i.start_seconds, 0)}–{fmt(i.end_seconds, 0)} s</div>
-              {i.reviewed_context ? <div className="li-cap">{i.reviewed_context}</div>
-                : i.visual_caption && <div className="li-cap">“{i.visual_caption}”</div>}
-            </li>
-          ))}
-        </ul>
-      </aside>
-      {sel ? <IncidentDetail id={sel} hidden={!!list.find((i) => i.incident_id === sel)?.hidden} onToggleHidden={toggleHidden} />
-        : <div className="card muted">No incidents to show.{hiddenCount > 0 && " Tick “Show incidents I hid” to bring hidden ones back."}</div>}
-    </div>
-  );
-}
-
-const Sev = ({ s }) => <span className={`sev ${String(s).toLowerCase()}`}>{s}</span>;
-
-function IncidentDetail({ id, hidden, onToggleHidden }) {
-  const [d, setD] = useState(null);
-  const [busy, setBusy] = useState(false);
-  async function toggle() { setBusy(true); try { await onToggleHidden(id, !hidden); } finally { setBusy(false); } }
-  useEffect(() => { setD(null); getJSON(`/api/incidents/${id}`).then(setD).catch(() => setD({ error: true })); }, [id]);
-  if (!d) return <div className="card muted">Loading {id}…</div>;
-  if (d.error) return <div className="card error">Could not load {id}.</div>;
-  return (
-    <div className="detail">
-      <div className="card">
-        <div className="dhead">
-          <div><h2>{d.incident_id}</h2><p className="muted">{d.video} · {d.category} · reference label: {d.reference_label}</p></div>
-          <span>{d.verified ? <span className="vbadge ok">Verified by CLIP</span>
-            : <span className="vbadge">{d.edit_only ? "Video edit (cut / logo / black frame)" : "Motion only · CLIP says Normal"}</span>} <Sev s={d.severity} />
-            <button className={`hide-btn ${hidden ? "on" : ""}`} disabled={busy} onClick={toggle}
-              title={hidden ? "Show this incident in the list again" : "Hide this incident from the list"}>{hidden ? "Unhide" : "Hide"}</button></span>
-        </div>
-        <SideBySide full={d.clips.full} start={d.start_seconds} end={d.end_seconds}
-          annotated={d.clips.annotated} km={d.key_moment && { start: d.key_moment.start_seconds, end: d.key_moment.end_seconds, peak: d.key_moment.peak_seconds }} />
-      </div>
-      <div className="grid2">
-        <div className="card">
-          <h3>Event context</h3>
-          {d.reviewed_context && (
-            <div className="reviewed">
-              <p className="muted small">Reviewed description (written after watching the clip):</p>
-              <p className="caption">{d.reviewed_context}</p>
-            </div>
-          )}
-          <div className="context">
-            {d.key_frame && <img src={d.key_frame} alt="Key-moment frame the caption describes" />}
-            <div>
-              <p className="muted small">AI caption of the incident's strongest frame (BLIP):</p>
-              <p className="caption">{d.visual_caption ? `“${d.visual_caption}”` : "No caption yet."}</p>
-              <p className="small"><b>Objects in this frame (YOLO):</b> {d.key_objects ?? "—"}</p>
-            </div>
+        )}
+        <div className="ai">
+          <img src={i.key_frame} alt="Strongest frame of the incident" />
+          <div>
+            <span className="eyebrow">AI caption · strongest frame</span>
+            <p className="caption">“{i.ai_caption}”</p>
+            <Objects text={i.key_objects} />
           </div>
-          {d.caution && <p className="muted small">{d.caution} Captions come from a general-purpose model and can be inaccurate.</p>}
-          <h3>Objects detected (whole incident)</h3>
-          <div className="chips">{d.objects.length ? d.objects.map((o) => <span key={o.name}>{o.name} × {o.count}</span>) : <span className="muted">none</span>}</div>
-        </div>
-        <div className="card">
-          <h3>Details</h3>
-          <dl className="kv">
-            <dt>Severity score</dt><dd>{fmt(d.severity_score)}</dd>
-            <dt>Anomaly confidence</dt><dd>{fmt(d.anomaly_confidence)}</dd>
-            <dt>Start → end</dt><dd>{fmt(d.start_seconds, 1)} s → {fmt(d.end_seconds, 1)} s</dd>
-            <dt>Duration</dt><dd>{fmt(d.duration_seconds, 1)} s</dd>
-            <dt>Samples</dt><dd>{d.sample_count}</dd>
-            <dt>Tracking records</dt><dd>{d.tracking_records}</dd>
-          </dl>
         </div>
       </div>
-      <div className="card">
-        <h3>Motion timeline — {d.video}</h3>
-        <Timeline points={d.timeline} start={d.start_seconds} end={d.end_seconds} />
-      </div>
-    </div>
+    </article>
   );
 }
 
-// Left: the full original video, opened at the incident start. Right: the annotated incident alone.
-function SideBySide({ full, start, end, annotated, km }) {
+function Objects({ text }) {
+  const items = (text && text !== "none") ? text.split(",").map((s) => s.trim().split(" ")) : [];
+  if (!items.length) return <p className="muted small">No people or cars detected in this frame.</p>;
   return (
-    <div className="videos">
-      <figure>
-        {full ? <video key={full} src={`${full}#t=${start ?? 0}`} controls muted /> : <div className="novideo">Full video unavailable</div>}
-        <figcaption>Full original video · incident {fmt(start, 0)}–{fmt(end, 0)} s (opens at {fmt(start, 0)} s)</figcaption>
-      </figure>
-      <figure>
-        {annotated ? <video key={annotated} src={annotated} controls muted /> : <div className="novideo">No incident clip. Run phase 11.</div>}
-        <figcaption>Incident only {km ? `${fmt(km.start, 1)}–${fmt(km.end, 1)} s (${fmt(km.end - km.start, 0)} s) · strongest at ${fmt(km.peak, 0)} s` : ""} · annotated: YOLO + tracking</figcaption>
-      </figure>
+    <div className="chips">
+      {items.map(([count, name]) => (
+        <span key={name} className={`chip ${name}`}>
+          {name === "person" ? <PersonIcon /> : <CarIcon />}
+          {count} {name === "person" ? (count === "1" ? "person" : "people") : (count === "1" ? "car" : "cars")}
+        </span>
+      ))}
     </div>
   );
 }
 
-function Timeline({ points, start, end, windows }) {
-  const wins = windows ?? (start !== undefined && end !== undefined ? [{ start, end }] : []);
+function Timeline({ points, incidents }) {
   if (!points?.length) return <p className="muted">No timeline data.</p>;
-  const W = 800, H = 180, P = { l: 40, r: 10, t: 10, b: 28 };
+  const W = 900, H = 190, P = { l: 36, r: 12, t: 14, b: 28 };
   const tmax = Math.max(...points.map((p) => p.timestamp_seconds), 1);
   const zs = points.map((p) => p.z_score ?? 0);
   const zmax = Math.max(Z_THRESHOLD + 1, ...zs), zmin = Math.min(0, ...zs);
   const x = (t) => P.l + (t / tmax) * (W - P.l - P.r);
   const y = (z) => P.t + (1 - (z - zmin) / (zmax - zmin)) * (H - P.t - P.b);
-  const line = points.map((p, i) => `${i ? "L" : "M"}${x(p.timestamp_seconds).toFixed(1)},${y(p.z_score ?? 0).toFixed(1)}`).join(" ");
+  const line = points.map((p, k) => `${k ? "L" : "M"}${x(p.timestamp_seconds).toFixed(1)},${y(p.z_score ?? 0).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1];
+  const area = `${line} L${x(last.timestamp_seconds).toFixed(1)},${y(zmin)} L${x(points[0].timestamp_seconds).toFixed(1)},${y(zmin)} Z`;
   return (
-    <svg className="timeline" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Motion z-score over time">
-      {wins.map((w) => (
-        <rect key={w.start} className="window" x={x(w.start) - 4} y={P.t} width={Math.max(8, x(w.end) - x(w.start) + 8)} height={H - P.t - P.b} />
+    <svg className="timeline" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Motion score over time with detected incidents">
+      {incidents.map((w, k) => (
+        <g key={w.incident_id}>
+          <rect className="window" x={x(w.start_seconds)} y={P.t} width={Math.max(6, x(w.end_seconds) - x(w.start_seconds))} height={H - P.t - P.b} rx="4" />
+          <text className="window-l" x={x(w.start_seconds) + 4} y={P.t + 13}>{k + 1}</text>
+        </g>
       ))}
       <line className="thr" x1={P.l} x2={W - P.r} y1={y(Z_THRESHOLD)} y2={y(Z_THRESHOLD)} />
-      <text className="thr-l" x={W - P.r} y={y(Z_THRESHOLD) - 4} textAnchor="end">threshold z = {Z_THRESHOLD}</text>
+      <path className="zarea" d={area} />
       <path className="zline" d={line} />
       {points.filter((p) => p.anomaly).map((p) => <circle key={p.timestamp_seconds} className="dot" cx={x(p.timestamp_seconds)} cy={y(p.z_score)} r="3.5" />)}
       <line className="axis" x1={P.l} x2={W - P.r} y1={H - P.b} y2={H - P.b} />
       {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-        <text key={f} className="tick" x={x(f * tmax)} y={H - 8} textAnchor="middle">{Math.round(f * tmax)} s</text>
+        <text key={f} className="tick" x={x(f * tmax)} y={H - 8} textAnchor="middle">{clock(f * tmax)}</text>
       ))}
-      <text className="tick" x={4} y={y(zmax) + 10}>z</text>
     </svg>
   );
 }
+
+const Check = () => (<svg className="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" /></svg>);
+const PersonIcon = () => (<svg className="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.5" r="2.5" /><path d="M3.5 14c0-2.8 2-4.5 4.5-4.5s4.5 1.7 4.5 4.5" /></svg>);
+const CarIcon = () => (<svg className="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 10.5V8l1.6-3.2c.2-.5.7-.8 1.2-.8h6.4c.5 0 1 .3 1.2.8L14 8v2.5" /><rect x="1.5" y="8" width="13" height="3.5" rx="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="11.5" cy="12" r="1" /></svg>);

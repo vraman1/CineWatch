@@ -3,10 +3,9 @@ __pycache__/
 *.pyc
 *.pt
 !models/yolov8n.pt
-dataset/videos/*
-!dataset/videos/.gitkeep
-frames/*
-!frames/.gitkeep
+!models/yolov8s.pt
+dataset/videos/
+frames/
 outputs/*
 !outputs/.gitkeep
 !outputs/evaluation/
